@@ -1,82 +1,85 @@
 package com.api.rest.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
-import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
-import org.springframework.security.oauth2.jwt.JwtClaimNames;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.stereotype.Component;
-import org.springframework.beans.factory.annotation.Value; // Asegúrate de que esta importación esté presente
 
 import java.util.Collection;
-import java.util.Collections; // Para Collections.emptySet()
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
 
 @Component
 public class JwtAuthenticationConverter implements Converter<Jwt, AbstractAuthenticationToken> {
 
-    private final JwtGrantedAuthoritiesConverter jwtGrantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
-
-    @Value("${jwt.auth.convert.principal-attribute}")
-    private String principalAttribute;
+    // Creamos un logger para esta clase
+    private static final Logger log = LoggerFactory.getLogger(JwtAuthenticationConverter.class);
 
     @Value("${jwt.auth.convert.resource-id}")
     private String resourceId;
 
+    @Value("${jwt.auth.convert.principal-attribute}")
+    private String principalAttribute;
 
     @Override
     public AbstractAuthenticationToken convert(Jwt jwt) {
+        log.info("==> Iniciando conversión de JWT para el principal: {}", getPrincipalClaimName(jwt));
 
-        Collection<GrantedAuthority> authorities = Stream
-                .concat(jwtGrantedAuthoritiesConverter.convert(jwt).stream(), extractResourceRoles(jwt).stream())
-                .toList();
+        Collection<GrantedAuthority> authorities = extractResourceRoles(jwt);
 
+        log.info("==> Authorities finales asignadas: {}", authorities);
 
-        return new JwtAuthenticationToken(jwt, authorities, getPrincipleName(jwt));
+        return new JwtAuthenticationToken(
+                jwt,
+                authorities,
+                getPrincipalClaimName(jwt)
+        );
     }
 
-    private Collection<? extends GrantedAuthority> extractResourceRoles(Jwt jwt){
-
-        Map<String, Object> resourceAccess;
-        Map<String, Object> resource;
-        Collection<String> resourceRoles;
-
-        if(jwt.getClaim("resource_access")==null){
-            return Set.of();
+    private String getPrincipalClaimName(Jwt jwt) {
+        String claimName = principalAttribute;
+        if (claimName == null) {
+            return jwt.getClaim("sub");
         }
-        resourceAccess =jwt.getClaim("resource_access");
+        return jwt.getClaim(claimName);
+    }
 
-        if (resourceAccess. get(resourceId)==null){
-            return Set.of();
+    @SuppressWarnings("unchecked")
+    private Collection<GrantedAuthority> extractResourceRoles(Jwt jwt) {
+        log.debug("==> Extrayendo roles del token...");
+        Map<String, Object> resourceAccess = jwt.getClaim("resource_access");
+
+        if (resourceAccess == null) {
+            log.warn("==> Claim 'resource_access' no encontrado en el token.");
+            return List.of();
         }
 
-        resource= (Map<String, Object>) resourceAccess.get(resourceId);
+        log.debug("==> Claim 'resource_access' encontrado: {}", resourceAccess);
 
-        if(resource.get("roles")==null){
-            return Set.of();
+        if (!resourceAccess.containsKey(resourceId)) {
+            log.warn("==> 'resource_access' no contiene el resource-id esperado: {}", resourceId);
+            return List.of();
         }
-        resourceRoles =(Collection<String>) resource.get("roles");
+
+        Map<String, Object> resource = (Map<String, Object>) resourceAccess.get(resourceId);
+        Collection<String> resourceRoles = (Collection<String>) resource.get("roles");
+
+        if (resourceRoles == null) {
+            log.warn("==> No se encontró la clave 'roles' para el resource-id: {}", resourceId);
+            return List.of();
+        }
+
+        log.info("==> Roles extraídos para el cliente '{}': {}", resourceId, resourceRoles);
 
         return resourceRoles.stream()
-                .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase()))
-                .toList();
-
-    }
-
-    private String getPrincipleName(Jwt jwt){
-        String claimName= JwtClaimNames.SUB;
-
-        if(principalAttribute !=null){
-            claimName= principalAttribute;
-        }
-
-        return jwt.getClaim(claimName);
+                .map(SimpleGrantedAuthority::new)
+                .collect(Collectors.toSet());
     }
 }
