@@ -10,10 +10,10 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+
+@CrossOrigin(origins = "http://localhost:5173")
 @RestController
 @RequestMapping("/keycloak/user")
-// CAMBIO IMPORTANTE: Volvemos a usar hasRole() porque tu nuevo SecurityConfig
-// añade el prefijo "ROLE_" a las autoridades.
 @PreAuthorize("hasRole('admin_client_role')")
 public class KeycloakController {
 
@@ -41,6 +41,7 @@ public class KeycloakController {
         keycloakService.updateUser(userId, userDTO);
         return ResponseEntity.ok("User updated successfully");
     }
+
     @DeleteMapping("/delete/{userId}")
     public ResponseEntity<String> deleteUser(@PathVariable String userId) {
         keycloakService.deleteUser(userId);
